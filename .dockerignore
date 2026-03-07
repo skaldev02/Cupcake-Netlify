@@ -1,0 +1,7 @@
+.git
+.gitignore
+*.md
+Dockerfile
+.dockerignore
+run-local.ps1
+railway.toml

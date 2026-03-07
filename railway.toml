@@ -1,0 +1,4 @@
+# Self-hosted k6 on Railway: one-shot load test per deploy.
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
