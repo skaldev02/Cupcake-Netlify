@@ -1,23 +1,17 @@
 /**
- * k6 load test – Railways (4 regions/replicas), 1000+ total VUs.
+ * k6 load test – Railways (4 regions/replicas), 50,000 total VUs.
  *
  * Analysis (why errors often happen with 4 replicas):
- * - Without replica awareness, each of 4 replicas runs 0→1200 VUs = 4800 total VUs and 4x load.
- * - That can cause OOM, "too many open files", and timeouts on the k6 process or target.
- * - Logging every request at 1200 VUs floods stdout and can break or slow Railways logs.
- *
- * Solution in this script:
- * - Set K6_REPLICA_COUNT=4 and give each instance a unique K6_REPLICA_INDEX (0–3).
- *   Then each replica runs ~300 VUs (1200/4), so total load stays at 1200.
- * - Logging is sampled (every K6_LOG_EVERY_ITER iteration) and every failure, to reduce log volume.
- * - Safe reading of response.timings to avoid undefined errors in logs.
+ * - Without replica awareness, each of 4 replicas runs full load and multiplies traffic.
+ * - Replica awareness ensures each instance runs only its share (~12,500 each).
  *
  * Railway env (recommended):
  *   BASE_URL=https://startling-cheesecake-58af04.netlify.app
  *   K6_REPLICA_COUNT=4
- *   K6_REPLICA_INDEX=0   (use 0, 1, 2, 3 for each replica – set per region/deployment if needed)
+ *   K6_REPLICA_INDEX=0   (0,1,2,3)
  *   K6_LOG_EVERY_ITER=100
  */
+
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 
@@ -26,8 +20,8 @@ const BASE_URL = __ENV.BASE_URL || 'https://brilliant-cupcake-576d17.netlify.app
 const REPLICA_COUNT = parseInt(__ENV.K6_REPLICA_COUNT || '1', 10);
 const REPLICA_INDEX = parseInt(__ENV.K6_REPLICA_INDEX || '0', 10);
 
-// Total target VUs across all replicas; per-replica target is derived below.
-const TOTAL_TARGET_VUS = 1200;
+// Total target VUs across all replicas
+const TOTAL_TARGET_VUS = 50000;
 const perReplica = Math.max(1, Math.ceil(TOTAL_TARGET_VUS / REPLICA_COUNT));
 
 export function setup() {
@@ -39,16 +33,16 @@ export function setup() {
 
 const PAGES = ['/'];
 
-// Stages scaled per replica so total load ≈ TOTAL_TARGET_VUS across all replicas.
+// Stages scaled per replica so total load ≈ 50k across all replicas
 const baseStages = [
-  { duration: '2m', target: 100 },
-  { duration: '3m', target: 400 },
-  { duration: '3m', target: 800 },
-  { duration: '2m', target: 1000 },
-  { duration: '5m', target: 1250 },
-  { duration: '10m', target: 1250 },
-  { duration: '3m', target: 600 },
-  { duration: '2m', target: 200 },
+  { duration: '2m', target: 4000 },
+  { duration: '3m', target: 16000 },
+  { duration: '3m', target: 32000 },
+  { duration: '2m', target: 42000 },
+  { duration: '5m', target: 50000 },
+  { duration: '10m', target: 50000 },
+  { duration: '3m', target: 24000 },
+  { duration: '2m', target: 8000 },
   { duration: '2m', target: 0 },
 ];
 
@@ -59,7 +53,13 @@ const scaledStages =
         target:
           s.target === 0
             ? 0
-            : Math.max(1, Math.min(perReplica, Math.ceil((s.target / TOTAL_TARGET_VUS) * perReplica))),
+            : Math.max(
+                1,
+                Math.min(
+                  perReplica,
+                  Math.ceil((s.target / TOTAL_TARGET_VUS) * perReplica)
+                )
+              ),
       }))
     : baseStages;
 
@@ -81,7 +81,7 @@ function getRandomUserAgent() {
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
 
-// Log only a sample + every failure to avoid log flood and OOM on Railways.
+// Log only a sample + every failure
 const LOG_EVERY_ITER = parseInt(__ENV.K6_LOG_EVERY_ITER || '100', 10);
 
 function safeDurationMs(response) {
@@ -115,7 +115,9 @@ export default function () {
 
   const durationMs = safeDurationMs(response);
   const bodyLen = response.body ? response.body.length : 0;
+
   const shouldLogComplete = shouldLogStart || !checkPassed;
+
   if (shouldLogComplete) {
     console.log(
       `[VU ${__VU}] REQUEST COMPLETE | URL=${url} | status=${response.status} | duration=${durationMs}ms | body_length=${bodyLen} | check=${checkPassed ? 'PASS' : 'FAIL'}`
